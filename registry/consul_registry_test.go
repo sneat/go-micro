@@ -2,6 +2,7 @@ package registry
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -201,5 +202,94 @@ func TestConsul_GetService_WithUnhealthyServiceNodes(t *testing.T) {
 
 	if exp, act := 0, len(svc[0].Nodes); exp != act {
 		t.Fatalf("Expected len of nodes to be `%d`, got `%d`.", exp, act)
+	}
+}
+
+// AllowStale sets whether any Consul server (non-leader) can service
+// a read. This allows for lower latency and higher throughput
+// at the cost of potentially stale data.
+// Works similar to Consul DNS Config option [1].
+// Defaults to true.
+//
+// [1] https://www.consul.io/docs/agent/options.html#allow_stale
+//
+func AllowStale(v bool) Option {
+	return func(o *Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, "consul_allow_stale", v)
+	}
+}
+
+// QueryOptions specifies the QueryOptions to be used when calling
+// Consul. See `Consul API` for more information [1].
+//
+// [1] https://godoc.org/github.com/hashicorp/consul/api#QueryOptions
+//
+func QueryOptions(q *consul.QueryOptions) Option {
+	return func(o *Options) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, "consul_query_options", q)
+	}
+}
+
+func TestQueryOptions_Default(t *testing.T) {
+	cr, cl := newConsulTestRegistry(&mockRegistry{
+		err: errors.New("client-error"),
+		url: "/v1/health/service/service-name",
+	})
+	defer cl()
+
+	configure(cr)
+	if !cr.queryOptions.AllowStale {
+		t.Fatalf("Expected AllowStale to be `true`, got `%t`.", cr.queryOptions.AllowStale)
+	}
+}
+
+func TestQueryOptions_AllowStale(t *testing.T) {
+	cr, cl := newConsulTestRegistry(&mockRegistry{
+		err: errors.New("client-error"),
+		url: "/v1/health/service/service-name",
+	})
+	defer cl()
+
+	configure(cr, AllowStale(true))
+	if !cr.queryOptions.AllowStale {
+		t.Fatalf("Expected AllowStale to be `true`, got `%t`.", cr.queryOptions.AllowStale)
+	}
+
+	configure(cr, AllowStale(false))
+	if cr.queryOptions.AllowStale {
+		t.Fatalf("Expected AllowStale to be `false`, got `%t`.", cr.queryOptions.AllowStale)
+	}
+}
+
+func TestQueryOptions_QueryOptions(t *testing.T) {
+	cr, cl := newConsulTestRegistry(&mockRegistry{
+		err: errors.New("client-error"),
+		url: "/v1/health/service/service-name",
+	})
+	defer cl()
+
+	configure(cr, QueryOptions(nil))
+	if !cr.queryOptions.AllowStale {
+		t.Fatalf("Expected AllowStale to be `true`, got `%t`.", cr.queryOptions.AllowStale)
+	}
+
+	configure(cr, QueryOptions(&consul.QueryOptions{}))
+	if cr.queryOptions.AllowStale {
+		t.Fatalf("Expected AllowStale to be `false`, got `%t`.", cr.queryOptions.AllowStale)
+	}
+
+	configure(cr, QueryOptions(&consul.QueryOptions{
+		NodeMeta: map[string]string{
+			"foo": "bar",
+		},
+	}))
+	if cr.queryOptions.NodeMeta == nil || cr.queryOptions.NodeMeta["foo"] != "bar" {
+		t.Fatalf("Expected NodeMeta to be `map[string]string{\"foo\":\"bar\"}`, got `%#v`.", cr.queryOptions.NodeMeta)
 	}
 }
