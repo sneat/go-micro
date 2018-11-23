@@ -229,6 +229,9 @@ func AllowStale(v bool) Option {
 //
 func QueryOptions(q *consul.QueryOptions) Option {
 	return func(o *Options) {
+		if q == nil {
+			return
+		}
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
